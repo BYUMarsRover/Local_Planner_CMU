@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="zed_ray">
+
+  <!-- Lens-dependent. 2.1 mm lens: 110 x 70 deg, min 0.3 m. 4 mm lens: 72 x 44 deg, min 1.5 m. -->
+  <xacro:property name="hfov_deg"  value="110.0"/>
+  <xacro:property name="vfov_deg"  value="70.0"/>
+  <xacro:property name="min_range" value="0.3"/>
+
+  <!-- Rover-dependent -->
+  <xacro:property name="tilt_deg"  value="0.0"/>   <!-- + = camera pitched down -->
+  <xacro:property name="max_range" value="6.0"/>   <!-- trusted depth; same crop cloud_registrar will use -->
+  <xacro:property name="hz"        value="10"/>
+  <xacro:property name="res_deg"   value="1.0"/>   <!-- angle between neighboring rays -->
+  <xacro:property name="noise"     value="0.02"/>  <!-- range noise std dev, m -->
+
+  <link name="lidar"/>
+
+  <joint name="zed_mount_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="lidar"/>
+    <child link="zed"/>
+  </joint>
+
+  <link name="zed">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+
+  <gazebo reference="zed">
+    <sensor type="ray" name="zed_ray">
+      <pose>0 0 0 0 0 0</pose>
+      <visualize>false</visualize>
+      <update_rate>${hz}</update_rate>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>${int(hfov_deg / res_deg) + 1}</samples>
+            <resolution>1</resolution>
+            <min_angle>${radians(-hfov_deg / 2)}</min_angle>
+            <max_angle>${radians(hfov_deg / 2)}</max_angle>
+          </horizontal>
+          <vertical>
+            <samples>${int(vfov_deg / res_deg) + 1}</samples>
+            <resolution>1</resolution>
+            <min_angle>${radians(-(vfov_deg / 2 + tilt_deg))}</min_angle>
+            <max_angle>${radians(vfov_deg / 2 - tilt_deg)}</max_angle>
+          </vertical>
+        </scan>
+        <range>
+          <min>${min_range}</min>
+          <max>${max_range + 1}</max>
+          <resolution>0.001</resolution>
+        </range>
+      </ray>
+      <plugin name="zed_ray_controller" filename="libgazebo_ros_velodyne_laser.so">
+        <ros>
+          <namespace>/zed_ray</namespace>
+          <remapping>~/out:=/velodyne_points</remapping>
+        </ros>
+        <frame_name>zed</frame_name>
+        <organize_cloud>false</organize_cloud>
+        <min_range>${min_range}</min_range>
+        <max_range>${max_range}</max_range>
+        <gaussian_noise>${noise}</gaussian_noise>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+</robot>
