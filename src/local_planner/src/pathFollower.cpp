@@ -64,6 +64,7 @@ double inclThre = 45.0;
 double stopTime = 5.0;
 bool noRotAtStop = false;
 bool noRotAtGoal = true;
+bool rotateWhenBlocked = false;  // ZED patch: turn in place toward a 1-point (blocked) path
 bool autonomyMode = false;
 double autonomySpeed = 1.0;
 double joyToSpeedDelay = 2.0;
@@ -217,6 +218,7 @@ int main(int argc, char** argv)
   nh->declare_parameter<bool>("autonomyMode", autonomyMode);
   nh->declare_parameter<double>("autonomySpeed", autonomySpeed);
   nh->declare_parameter<double>("joyToSpeedDelay", joyToSpeedDelay);
+  nh->declare_parameter<bool>("rotateWhenBlocked", rotateWhenBlocked);
 
   nh->get_parameter("sensorOffsetX", sensorOffsetX);
   nh->get_parameter("sensorOffsetY", sensorOffsetY);
@@ -246,6 +248,7 @@ int main(int argc, char** argv)
   nh->get_parameter("autonomyMode", autonomyMode);
   nh->get_parameter("autonomySpeed", autonomySpeed);
   nh->get_parameter("joyToSpeedDelay", joyToSpeedDelay);
+  nh->get_parameter("rotateWhenBlocked", rotateWhenBlocked);
 
   auto subOdom = nh->create_subscription<nav_msgs::msg::Odometry>("/state_estimation", 5, odomHandler);
 
@@ -334,7 +337,7 @@ int main(int argc, char** argv)
 
       if (joySpeed2 == 0 && !autonomyMode) {
         vehicleYawRate = maxYawRate * joyYaw * PI / 180.0;
-      } else if (pathSize <= 1 || (dis < stopDisThre && noRotAtGoal)) {
+      } else if ((pathSize <= 1 && !rotateWhenBlocked) || (dis < stopDisThre && noRotAtGoal)) {
         vehicleYawRate = 0;
       }
 
