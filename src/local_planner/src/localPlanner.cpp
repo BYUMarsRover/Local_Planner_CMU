@@ -84,6 +84,10 @@ double joyToCheckObstacleDelay = 5.0;
 double goalClearRange = 0.5;
 double goalX = 0;
 double goalY = 0;
+// ZED patch: only accept paths fully inside the camera's horizontal field of view
+bool useFovCheck = false;
+double fovHalfAngle = 55.0;  // degrees, half of the camera's horizontal FOV
+int blockedTurnDir = 0;      // 0 = not blocked, +1 = turn left (CCW), -1 = turn right (CW)
 
 float joySpeed = 0;
 float joySpeedRaw = 0;
@@ -319,6 +323,33 @@ void checkObstacleHandler(const std_msgs::msg::Bool::ConstSharedPtr checkObs)
   }
 }
 
+#if PLOTPATHSET == 1
+// ZED patch: true if every point of path pathID (rotated by rotDir, scaled by scale)
+// that is within checkDis (unscaled) and outside the vehicle footprint is inside the FOV.
+bool pathInFov(int rotDir, int pathID, float scale, float checkDis)
+{
+  float rotAng = (10.0 * rotDir - 180.0) * PI / 180;
+  float cosRotAng = cos(rotAng);
+  float sinRotAng = sin(rotAng);
+
+  int pathPointNum = paths[pathID]->points.size();
+  for (int j = 0; j < pathPointNum; j++) {
+    float x = paths[pathID]->points[j].x;
+    float y = paths[pathID]->points[j].y;
+    if (sqrt(x * x + y * y) > checkDis) continue;  // beyond the part the planner checks
+
+    float pointX = scale * (cosRotAng * x - sinRotAng * y);  // rotate + scale into vehicle frame
+    float pointY = scale * (sinRotAng * x + cosRotAng * y);
+    if (fabs(pointX) < vehicleLength / 2.0 && fabs(pointY) < vehicleWidth / 2.0) continue;  // under the robot
+
+    float bearing = atan2(pointY - sensorOffsetY, pointX - sensorOffsetX) * 180.0 / PI;  // angle seen from the camera
+    if (fabs(bearing) > fovHalfAngle) return false;
+  }
+  return true;
+}
+#endif
+
+
 int readPlyHeader(FILE *filePtr)
 {
   char str[50];
@@ -541,6 +572,9 @@ int main(int argc, char** argv)
   nh->declare_parameter<double>("goalClearRange", goalClearRange);
   nh->declare_parameter<double>("goalX", goalX);
   nh->declare_parameter<double>("goalY", goalY);
+  nh->declare_parameter<bool>("useFovCheck", useFovCheck);
+  nh->declare_parameter<double>("fovHalfAngle", fovHalfAngle);
+
 
   nh->get_parameter("pathFolder", pathFolder);
   nh->get_parameter("vehicleLength", vehicleLength);
@@ -581,6 +615,9 @@ int main(int argc, char** argv)
   nh->get_parameter("goalClearRange", goalClearRange);
   nh->get_parameter("goalX", goalX);
   nh->get_parameter("goalY", goalY);
+  nh->get_parameter("useFovCheck", useFovCheck);
+  nh->get_parameter("fovHalfAngle", fovHalfAngle);
+
 
   auto subOdometry = nh->create_subscription<nav_msgs::msg::Odometry>("/state_estimation", 5, odometryHandler);
 
@@ -817,6 +854,11 @@ int main(int argc, char** argv)
 
         if (minObsAngCW > 0) minObsAngCW = 0;
         if (minObsAngCCW < 0) minObsAngCCW = 0;
+        // ZED patch: test the same stretch of path the obstacle check uses
+        float fovCheckDis = pathRange / pathScale;
+        if (pathCropByGoal && (relativeGoalDis + goalClearRange) / pathScale < fovCheckDis) {
+          fovCheckDis = (relativeGoalDis + goalClearRange) / pathScale;
+        }
 
         for (int i = 0; i < 36 * pathNum; i++) {
           int rotDir = int(i / pathNum);
@@ -829,7 +871,7 @@ int main(int argc, char** argv)
             continue;
           }
 
-          if (clearPathList[i] < pointPerPathThre) {
+          if (clearPathList[i] < pointPerPathThre && (!useFovCheck || pathInFov(rotDir, i % pathNum, pathScale, fovCheckDis))) {
             float penaltyScore = 1.0 - pathPenaltyList[i] / costHeightThre;
             if (penaltyScore < costScore) penaltyScore = costScore;
 
@@ -910,7 +952,7 @@ int main(int argc, char** argv)
               continue;
             }
 
-            if (clearPathList[i] < pointPerPathThre) {
+            if (clearPathList[i] < pointPerPathThre && (!useFovCheck || pathInFov(rotDir, i % pathNum, pathScale, fovCheckDis))) {
               int freePathLength = paths[i % pathNum]->points.size();
               for (int j = 0; j < freePathLength; j++) {
                 point = paths[i % pathNum]->points[j];
@@ -953,11 +995,15 @@ int main(int argc, char** argv)
         }
       }
       pathScale = defPathScale;
+      if (pathFound) blockedTurnDir = 0;  // ZED patch: unlatch once a path exists
 
       if (!pathFound) {
+        // ZED patch: pick the goal's side once and keep it while blocked
+        if (blockedTurnDir == 0) blockedTurnDir = (joyDir >= 0) ? 1 : -1;
+
         path.poses.resize(1);
         path.poses[0].pose.position.x = 0;
-        path.poses[0].pose.position.y = 0;
+        path.poses[0].pose.position.y = blockedTurnDir;  // 1 m to the side to turn toward
         path.poses[0].pose.position.z = 0;
 
         path.header.stamp = rclcpp::Time(static_cast<uint64_t>(odomTime * 1e9));

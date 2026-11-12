@@ -145,8 +145,11 @@ void scanHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr scanIn)
   float vehicleRecX = vehicleX;
   float vehicleRecY = vehicleY;
   float vehicleRecZ = vehicleZ;
-  float terrainRecRoll = terrainRoll;
-  float terrainRecPitch = terrainPitch;
+  // Sensor now turns with the robot (see lidarState in main), so register with the
+  // vehicle's roll/pitch/yaw instead of the world-axis terrain roll/pitch.
+  float vehicleRecRoll = vehicleRoll;
+  float vehicleRecPitch = vehiclePitch;
+  float vehicleRecYaw = vehicleYaw;
 
   if (use_gazebo_time)
   {
@@ -154,14 +157,17 @@ void scanHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr scanIn)
     vehicleRecX = vehicleXStack[odomRecIDPointer];
     vehicleRecY = vehicleYStack[odomRecIDPointer];
     vehicleRecZ = vehicleZStack[odomRecIDPointer];
-    terrainRecRoll = terrainRollStack[odomRecIDPointer];
-    terrainRecPitch = terrainPitchStack[odomRecIDPointer];
+    vehicleRecRoll = vehicleRollStack[odomRecIDPointer];
+    vehicleRecPitch = vehiclePitchStack[odomRecIDPointer];
+    vehicleRecYaw = vehicleYawStack[odomRecIDPointer];
   }
 
-  float sinTerrainRecRoll = sin(terrainRecRoll);
-  float cosTerrainRecRoll = cos(terrainRecRoll);
-  float sinTerrainRecPitch = sin(terrainRecPitch);
-  float cosTerrainRecPitch = cos(terrainRecPitch);
+  float sinVehicleRecRoll = sin(vehicleRecRoll);
+  float cosVehicleRecRoll = cos(vehicleRecRoll);
+  float sinVehicleRecPitch = sin(vehicleRecPitch);
+  float cosVehicleRecPitch = cos(vehicleRecPitch);
+  float sinVehicleRecYaw = sin(vehicleRecYaw);
+  float cosVehicleRecYaw = cos(vehicleRecYaw);
 
   scanData->clear();
   pcl::fromROSMsg(*scanIn, *scanData);
@@ -170,21 +176,25 @@ void scanHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr scanIn)
   int scanDataSize = scanData->points.size();
   for (int i = 0; i < scanDataSize; i++)
   {
+    // 1. Roll: rotate about x (forward). y and z change.
     float pointX1 = scanData->points[i].x;
-    float pointY1 = scanData->points[i].y * cosTerrainRecRoll - scanData->points[i].z * sinTerrainRecRoll;
-    float pointZ1 = scanData->points[i].y * sinTerrainRecRoll + scanData->points[i].z * cosTerrainRecRoll;
+    float pointY1 = scanData->points[i].y * cosVehicleRecRoll - scanData->points[i].z * sinVehicleRecRoll;
+    float pointZ1 = scanData->points[i].y * sinVehicleRecRoll + scanData->points[i].z * cosVehicleRecRoll;
 
-    float pointX2 = pointX1 * cosTerrainRecPitch + pointZ1 * sinTerrainRecPitch;
+    // 2. Pitch: rotate about y (left). x and z change.
+    float pointX2 = pointX1 * cosVehicleRecPitch + pointZ1 * sinVehicleRecPitch;
     float pointY2 = pointY1;
-    float pointZ2 = -pointX1 * sinTerrainRecPitch + pointZ1 * cosTerrainRecPitch;
+    float pointZ2 = -pointX1 * sinVehicleRecPitch + pointZ1 * cosVehicleRecPitch;
 
-    float pointX3 = pointX2 + vehicleRecX;
-    float pointY3 = pointY2 + vehicleRecY;
-    float pointZ3 = pointZ2 + vehicleRecZ;
+    // 3. Yaw: rotate about z (up). x and y change. New: x_w = x cos - y sin, y_w = x sin + y cos.
+    float pointX3 = pointX2 * cosVehicleRecYaw - pointY2 * sinVehicleRecYaw;
+    float pointY3 = pointX2 * sinVehicleRecYaw + pointY2 * cosVehicleRecYaw;
+    float pointZ3 = pointZ2;
 
-    scanData->points[i].x = pointX3;
-    scanData->points[i].y = pointY3;
-    scanData->points[i].z = pointZ3;
+    // 4. Translate: move from the robot's position into the map frame.
+    scanData->points[i].x = pointX3 + vehicleRecX;
+    scanData->points[i].y = pointY3 + vehicleRecY;
+    scanData->points[i].z = pointZ3 + vehicleRecZ;
   }
 
   // publish 5Hz registered scan messages
@@ -537,9 +547,12 @@ int main(int argc, char** argv)
     request->state = robotState;
     response = client->async_send_request(request);
 
-    quat_tf.setRPY(terrainRoll, terrainPitch, 0);
-    tf2::convert(quat_tf, geoQuat);
-    lidarState.pose.orientation = geoQuat;
+    // Sensor turns with the robot (needed for a forward-facing ZED).
+    // Upstream kept the lidar at yaw = 0 so 360-deg scans stayed world-aligned:
+    // quat_tf.setRPY(terrainRoll, terrainPitch, 0);
+    // tf2::convert(quat_tf, geoQuat);
+    lidarState.pose.orientation = geoQuat;   // still the vehicle roll/pitch/yaw from line 426
+
     lidarState.pose.position.x = vehicleX;
     lidarState.pose.position.y = vehicleY;
     lidarState.pose.position.z = vehicleZ;
