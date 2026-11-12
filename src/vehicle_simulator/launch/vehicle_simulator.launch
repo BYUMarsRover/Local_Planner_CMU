@@ -40,6 +40,8 @@ def generate_launch_description():
   record = LaunchConfiguration('record')
   verbose = LaunchConfiguration('verbose')
   world_name = LaunchConfiguration('world_name')
+  useTerrainMap = LaunchConfiguration('useTerrainMap')
+  terrainMapInclRadius = LaunchConfiguration('terrainMapInclRadius')
   sensor_xacro = LaunchConfiguration('sensor_xacro')
 
   declare_sensorOffsetX = DeclareLaunchArgument('sensorOffsetX', default_value='0.0', description='')
@@ -69,6 +71,8 @@ def generate_launch_description():
   declare_record = DeclareLaunchArgument('record', default_value='false', description='')
   declare_verbose = DeclareLaunchArgument('verbose', default_value='false', description='')
   declare_world_name = DeclareLaunchArgument('world_name', default_value='garage', description='')
+  declare_useTerrainMap = DeclareLaunchArgument('useTerrainMap', default_value='true', description='use mesh/<world_name>/heightmap.bin for ground height and tilt when it exists')
+  declare_terrainMapInclRadius = DeclareLaunchArgument('terrainMapInclRadius', default_value='0.75', description='half-span (m) of the terrain-map slope estimate')
   declare_sensor_xacro = DeclareLaunchArgument('sensor_xacro', default_value='zed_ray.urdf.xacro',
                                                description='Sensor file in vehicle_simulator/urdf: zed_ray.urdf.xacro or lidar.urdf.xacro')
   
@@ -199,7 +203,9 @@ def generate_launch_description():
   ld.add_action(declare_record)
   ld.add_action(declare_verbose)
   ld.add_action(declare_world_name)
-  ld.add_action(declare_sensor_xacro) 
+  ld.add_action(declare_useTerrainMap)
+  ld.add_action(declare_terrainMapInclRadius)
+  ld.add_action(declare_sensor_xacro)
   ld.add_action(OpaqueFunction(function=declare_world_action, args=[world_name]))
 
   ld.add_action(start_gazebo)
